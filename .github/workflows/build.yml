@@ -22,17 +22,7 @@ jobs:
         run: chmod +x ./gradlew
 
       - name: Build Debug APK
-        run: |
-          ./gradlew assembleDebug --no-daemon --stacktrace 2>&1 | tee build.log
-
-      - name: Publish build log to Summary
-        if: always()
-        run: |
-          echo "### Build Log" >> $GITHUB_STEP_SUMMARY
-          echo '```' >> $GITHUB_STEP_SUMMARY
-          tail -n 120 build.log >> $GITHUB_STEP_SUMMARY
-          echo '```' >> $GITHUB_STEP_SUMMARY
-          grep "BUILD SUCCESSFUL" build.log || exit 1
+        run: ./gradlew assembleDebug --no-daemon
 
       - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
