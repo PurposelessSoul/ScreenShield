@@ -123,8 +123,14 @@ class UsageMonitorService : Service() {
         const val YOUTUBE_TV = "com.google.android.youtube.tv"
         const val YOUTUBE_MOBILE = "com.google.android.youtube"
         
-        fun start(context: Context) = 
-            context.startForegroundService(Intent(context, UsageMonitorService::class.java))
+        fun start(context: Context) {
+            val intent = Intent(context, UsageMonitorService::class.java)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                context.startForegroundService(intent)
+            } else {
+                context.startService(intent)
+            }
+        }
         fun stop(context: Context) = 
             context.stopService(Intent(context, UsageMonitorService::class.java))
         
