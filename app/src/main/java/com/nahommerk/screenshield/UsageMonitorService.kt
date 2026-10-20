@@ -64,7 +64,7 @@ class UsageMonitorService : Service() {
                         BlockOverlayActivity.launchTimeUp(this@UsageMonitorService)
                     }
                 }
-            } catch (_: Exception) {
+            } catch (e: Exception) {
                 // never crash the monitor
             }
             handler.postDelayed(this, TICK_MS)
