@@ -71,22 +71,42 @@ class UsageMonitorService : Service() {
         }
     }
     
-    /** Returns the YouTube package if it is currently in the foreground, else null. */
+    /** Returns the YouTube package if it is currently in the foreground, else null.
+     *  Uses a two-strategy approach for Android TV compatibility:
+     *  1. queryEvents over 60s window (catches transitions)
+     *  2. queryUsageStats fallback (reliable for apps already running)
+     */
     private fun foregroundYouTube(): String? {
         if (!hasUsageAccess(this)) return null
         val usm = getSystemService(Context.USAGE_STATS_SERVICE) as UsageStatsManager
         val now = System.currentTimeMillis()
-        val events = usm.queryEvents(now - 15_000, now)
+
+        // Strategy 1: scan events over last 60 seconds
+        val events = usm.queryEvents(now - 60_000, now)
         var lastPkg: String? = null
         val ev = UsageEvents.Event()
         while (events.hasNextEvent()) {
             events.getNextEvent(ev)
             when (ev.eventType) {
                 UsageEvents.Event.ACTIVITY_RESUMED -> lastPkg = ev.packageName
-                UsageEvents.Event.ACTIVITY_PAUSED -> if (ev.packageName == lastPkg) lastPkg = null
+                UsageEvents.Event.ACTIVITY_PAUSED,
+                UsageEvents.Event.ACTIVITY_STOPPED -> if (ev.packageName == lastPkg) lastPkg = null
             }
         }
-        return if (lastPkg == YOUTUBE_TV || lastPkg == YOUTUBE_MOBILE) lastPkg else null
+        if (lastPkg == YOUTUBE_TV || lastPkg == YOUTUBE_MOBILE) return lastPkg
+
+        // Strategy 2: queryUsageStats — check which YouTube package had the most recent foreground use
+        // within the last 3 minutes. If its lastTimeUsed is within 30s, it's still in foreground.
+        val stats = usm.queryUsageStats(
+            UsageStatsManager.INTERVAL_DAILY, now - 3 * 60_000L, now
+        )
+        if (stats.isNullOrEmpty()) return null
+        val recent = stats
+            .filter { it.packageName == YOUTUBE_TV || it.packageName == YOUTUBE_MOBILE }
+            .maxByOrNull { it.lastTimeUsed }
+            ?: return null
+        // If YouTube was last seen within the past 30 seconds, count it as in foreground
+        return if (now - recent.lastTimeUsed <= 30_000L) recent.packageName else null
     }
     
     private fun goHome() {
