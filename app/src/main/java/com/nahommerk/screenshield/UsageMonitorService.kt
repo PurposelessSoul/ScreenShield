@@ -20,6 +20,8 @@ class UsageMonitorService : Service() {
     private lateinit var prefs: Prefs
     private val handler = Handler(Looper.getMainLooper())
     private var lastTickMs = 0L
+    private var lastUsageEventMs = 0L
+    private var foregroundPackage: String? = null
     
     override fun onBind(intent: Intent?): IBinder? = null
     
@@ -27,6 +29,13 @@ class UsageMonitorService : Service() {
         super.onCreate()
         prefs = Prefs(this)
         lastTickMs = System.currentTimeMillis()
+        // Recover the current app if Android restarted this service while YouTube
+        // was already open. Once initialized, keep state across polling ticks;
+        // foreground events do not repeat while a video is playing.
+        foregroundPackage = prefs.foregroundPackage()
+            .takeIf { System.currentTimeMillis() - prefs.foregroundPackageAt() < STARTUP_STATE_MAX_AGE_MS }
+        lastUsageEventMs = System.currentTimeMillis() - STARTUP_EVENT_LOOKBACK_MS
+        updateForegroundFromUsageEvents(System.currentTimeMillis())
         startForegroundWithNotification()
         handler.postDelayed(tick, TICK_MS)
     }
@@ -51,7 +60,15 @@ class UsageMonitorService : Service() {
                         prefs.setLastDay(today)
                         prefs.setWatchedMs(0)
                     }
-                    val onYouTube = foregroundYouTube() != null
+                    updateForegroundFromUsageEvents(now)
+                    // Accessibility events are delivered continuously on devices
+                    // where UsageStats events are delayed or incomplete (common
+                    // on Android TV firmware).
+                    val accessibilityPackage = prefs.foregroundPackage()
+                    if (now - prefs.foregroundPackageAt() <= ACCESSIBILITY_STATE_MAX_AGE_MS) {
+                        foregroundPackage = accessibilityPackage
+                    }
+                    val onYouTube = isYouTube(foregroundPackage)
                     if (onYouTube) {
                         prefs.setWatchedMs(prefs.watchedMs() + delta)
                     }
@@ -71,42 +88,28 @@ class UsageMonitorService : Service() {
         }
     }
     
-    /** Returns the YouTube package if it is currently in the foreground, else null.
-     *  Uses a two-strategy approach for Android TV compatibility:
-     *  1. queryEvents over 60s window (catches transitions)
-     *  2. queryUsageStats fallback (reliable for apps already running)
-     */
-    private fun foregroundYouTube(): String? {
-        if (!hasUsageAccess(this)) return null
+    /** Retain the last foreground app from transition events. A video may remain
+     * foreground for hours without generating another resume event. */
+    private fun updateForegroundFromUsageEvents(now: Long) {
+        if (!hasUsageAccess(this)) return
         val usm = getSystemService(Context.USAGE_STATS_SERVICE) as UsageStatsManager
-        val now = System.currentTimeMillis()
-
-        // Strategy 1: scan events over last 60 seconds
-        val events = usm.queryEvents(now - 60_000, now)
-        var lastPkg: String? = null
+        val from = lastUsageEventMs.coerceAtMost(now - 1)
+        val events = usm.queryEvents(from, now)
         val ev = UsageEvents.Event()
         while (events.hasNextEvent()) {
             events.getNextEvent(ev)
             when (ev.eventType) {
-                UsageEvents.Event.ACTIVITY_RESUMED -> lastPkg = ev.packageName
+                UsageEvents.Event.ACTIVITY_RESUMED,
+                UsageEvents.Event.MOVE_TO_FOREGROUND -> foregroundPackage = ev.packageName
                 UsageEvents.Event.ACTIVITY_PAUSED,
-                UsageEvents.Event.ACTIVITY_STOPPED -> if (ev.packageName == lastPkg) lastPkg = null
+                UsageEvents.Event.ACTIVITY_STOPPED,
+                UsageEvents.Event.MOVE_TO_BACKGROUND -> if (ev.packageName == foregroundPackage) {
+                    foregroundPackage = null
+                }
             }
+            lastUsageEventMs = maxOf(lastUsageEventMs, ev.timeStamp)
         }
-        if (lastPkg == YOUTUBE_TV || lastPkg == YOUTUBE_MOBILE) return lastPkg
-
-        // Strategy 2: queryUsageStats — check which YouTube package had the most recent foreground use
-        // within the last 3 minutes. If its lastTimeUsed is within 30s, it's still in foreground.
-        val stats = usm.queryUsageStats(
-            UsageStatsManager.INTERVAL_DAILY, now - 3 * 60_000L, now
-        )
-        if (stats.isNullOrEmpty()) return null
-        val recent = stats
-            .filter { it.packageName == YOUTUBE_TV || it.packageName == YOUTUBE_MOBILE }
-            .maxByOrNull { it.lastTimeUsed }
-            ?: return null
-        // If YouTube was last seen within the past 30 seconds, count it as in foreground
-        return if (now - recent.lastTimeUsed <= 30_000L) recent.packageName else null
+        lastUsageEventMs = now
     }
     
     private fun goHome() {
@@ -140,8 +143,14 @@ class UsageMonitorService : Service() {
     
     companion object {
         private const val TICK_MS = 5_000L
+        private const val STARTUP_EVENT_LOOKBACK_MS = 24 * 60 * 60 * 1000L
+        private const val STARTUP_STATE_MAX_AGE_MS = 15_000L
+        private const val ACCESSIBILITY_STATE_MAX_AGE_MS = 15_000L
         const val YOUTUBE_TV = "com.google.android.youtube.tv"
         const val YOUTUBE_MOBILE = "com.google.android.youtube"
+
+        fun isYouTube(packageName: String?): Boolean =
+            packageName == YOUTUBE_TV || packageName == YOUTUBE_MOBILE
         
         fun start(context: Context) {
             val intent = Intent(context, UsageMonitorService::class.java)

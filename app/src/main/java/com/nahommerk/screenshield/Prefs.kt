@@ -19,6 +19,12 @@ class Prefs(context: Context) {
     fun setLastDay(v: String) = sp.edit().putString(K_DAY, v).apply()
     fun graceUntil() = sp.getLong(K_GRACE, 0L)
     fun setGraceUntil(v: Long) = sp.edit().putLong(K_GRACE, v).apply()
+    fun foregroundPackage(): String = sp.getString(K_FOREGROUND_PACKAGE, "") ?: ""
+    fun foregroundPackageAt(): Long = sp.getLong(K_FOREGROUND_PACKAGE_AT, 0L)
+    fun setForegroundPackage(packageName: String, at: Long) = sp.edit()
+        .putString(K_FOREGROUND_PACKAGE, packageName)
+        .putLong(K_FOREGROUND_PACKAGE_AT, at)
+        .apply()
     fun pin(): String = sp.getString(K_PIN, "0000") ?: "0000"
     fun setPin(v: String) = sp.edit().putString(K_PIN, v).apply()
     fun keywords(): MutableSet<String> = 
@@ -38,6 +44,8 @@ class Prefs(context: Context) {
         private const val K_WATCHED = "watched_ms"
         private const val K_DAY = "last_day"
         private const val K_GRACE = "grace_until"
+        private const val K_FOREGROUND_PACKAGE = "foreground_package"
+        private const val K_FOREGROUND_PACKAGE_AT = "foreground_package_at"
         private const val K_PIN = "pin"
         private const val K_KEYWORDS = "keywords"
     }

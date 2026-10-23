@@ -4,4 +4,4 @@
     android:accessibilityFlags="flagDefault|flagIncludeNotImportantViews|flagReportViewIds"
     android:canRetrieveWindowContent="true"
     android:notificationTimeout="300"
-    android:packageNames="com.google.android.youtube.tv,com.google.android.youtube" />
+    />
