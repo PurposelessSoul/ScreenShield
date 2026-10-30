@@ -15,11 +15,11 @@ import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
 import androidx.core.app.NotificationCompat
+import java.util.Calendar
 
 class UsageMonitorService : Service() {
     private lateinit var prefs: Prefs
     private val handler = Handler(Looper.getMainLooper())
-    private var lastTickMs = 0L
     private var lastUsageEventMs = 0L
     private var foregroundPackage: String? = null
     
@@ -28,12 +28,14 @@ class UsageMonitorService : Service() {
     override fun onCreate() {
         super.onCreate()
         prefs = Prefs(this)
-        lastTickMs = System.currentTimeMillis()
         // Recover the current app if Android restarted this service while YouTube
         // was already open. Once initialized, keep state across polling ticks;
         // foreground events do not repeat while a video is playing.
         foregroundPackage = prefs.foregroundPackage()
-            .takeIf { System.currentTimeMillis() - prefs.foregroundPackageAt() < STARTUP_STATE_MAX_AGE_MS }
+            .takeIf {
+                isYouTube(it) &&
+                    System.currentTimeMillis() - prefs.foregroundPackageAt() < STARTUP_STATE_MAX_AGE_MS
+            }
         lastUsageEventMs = System.currentTimeMillis() - STARTUP_EVENT_LOOKBACK_MS
         updateForegroundFromUsageEvents(System.currentTimeMillis())
         startForegroundWithNotification()
@@ -51,8 +53,6 @@ class UsageMonitorService : Service() {
         override fun run() {
             try {
                 val now = System.currentTimeMillis()
-                val delta = now - lastTickMs
-                lastTickMs = now
                 if (prefs.timeLimitEnabled()) {
                     // Midnight rollover: reset today's watched time.
                     val today = TimeBudget.dayKey(now)
@@ -61,24 +61,27 @@ class UsageMonitorService : Service() {
                         prefs.setWatchedMs(0)
                         prefs.setOverrideLimitMs(0)
                     }
+                    // Use Android's cumulative daily foreground time as the
+                    // source of truth instead of incrementing our own stopwatch.
+                    queryTodayYouTubeTimeMs(now)?.let(prefs::setWatchedMs)
                     updateForegroundFromUsageEvents(now)
                     // Accessibility events are delivered continuously on devices
                     // where UsageStats events are delayed or incomplete (common
-                    // on Android TV firmware).
+                    // on Android TV firmware). Only trust them as a fallback when
+                    // they identify YouTube; TV vendor overlays can emit their
+                    // own accessibility events while YouTube remains foreground.
                     val accessibilityPackage = prefs.foregroundPackage()
-                    if (now - prefs.foregroundPackageAt() <= ACCESSIBILITY_STATE_MAX_AGE_MS) {
+                    if (isYouTube(accessibilityPackage) &&
+                        now - prefs.foregroundPackageAt() <= ACCESSIBILITY_STATE_MAX_AGE_MS
+                    ) {
                         foregroundPackage = accessibilityPackage
                     }
                     val onYouTube = isYouTube(foregroundPackage)
-                    if (onYouTube) {
-                        prefs.setWatchedMs(prefs.watchedMs() + delta)
-                    }
                     val baseLimitMs = prefs.limitMinutes().coerceAtLeast(0).toLong() * 60_000L
                     val limitMs = if (baseLimitMs == 0L) 0L
                         else maxOf(baseLimitMs, prefs.overrideLimitMs())
                     if (onYouTube &&
-                        TimeBudget.isExceeded(prefs.watchedMs(), limitMs) &&
-                        prefs.timeLimitEnabled()
+                        TimeBudget.isExceeded(prefs.watchedMs(), limitMs)
                     ) {
                         goHome()
                         BlockOverlayActivity.launchTimeUp(this@UsageMonitorService)
@@ -88,6 +91,32 @@ class UsageMonitorService : Service() {
                 // never crash the monitor
             }
             handler.postDelayed(this, TICK_MS)
+        }
+    }
+
+    /** Returns YouTube's Android-reported foreground total for the local day. */
+    private fun queryTodayYouTubeTimeMs(now: Long): Long? {
+        if (!hasUsageAccess(this)) return null
+        val startOfDay = Calendar.getInstance().apply {
+            timeInMillis = now
+            set(Calendar.HOUR_OF_DAY, 0)
+            set(Calendar.MINUTE, 0)
+            set(Calendar.SECOND, 0)
+            set(Calendar.MILLISECOND, 0)
+        }.timeInMillis
+        return try {
+            val usm = getSystemService(Context.USAGE_STATS_SERVICE) as UsageStatsManager
+            val todayStats = usm.queryUsageStats(
+                UsageStatsManager.INTERVAL_DAILY,
+                startOfDay,
+                now
+            ) ?: return null
+            todayStats.asSequence()
+                .filter { isYouTube(it.packageName) }
+                .map { it.totalTimeInForeground }
+                .maxOrNull() ?: 0L
+        } catch (_: Exception) {
+            null
         }
     }
     
