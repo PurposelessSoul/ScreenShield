@@ -98,7 +98,10 @@ class MainActivity : AppCompatActivity() {
         addButton({ "Remove keyword" }) { removeKeyword() }
         addButton({ "Change PIN" }) { changePin() }
         addButton({ "Open accessibility settings" }) {
-            startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
+            openSettings(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
+        }
+        addButton({ "Open usage access settings" }) {
+            openSettings(Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS))
         }
         
         setContentView(scroll)
@@ -106,12 +109,18 @@ class MainActivity : AppCompatActivity() {
     
     private fun refresh() {
         val watchedMin = prefs.watchedMs() / 60_000
-        statusText.text = "Today: $watchedMin min watched \u2022 Limit: ${limitLabel()}"
+        val baseLimitMs = prefs.limitMinutes().coerceAtLeast(0).toLong() * 60_000L
+        val bonusMin = if (baseLimitMs > 0L)
+            ((prefs.overrideLimitMs() - baseLimitMs).coerceAtLeast(0L) / 60_000L) else 0L
+        val bonusText = if (bonusMin > 0) " (+$bonusMin min parent bonus)" else ""
+        statusText.text = "Today: $watchedMin min watched \u2022 Limit: ${limitLabel()}$bonusText"
         permText.text = buildString {
             append(if (UsageMonitorService.hasUsageAccess(this@MainActivity)) "\u2705" else "\u274C")
             append(" Usage access ")
             append(if (isFilterServiceEnabled()) "\u2705" else "\u274C")
-            append(" Content filter service")
+            append(" Accessibility service ")
+            append(if (prefs.filterEnabled()) "\u2705" else "\u274C")
+            append(" Content filter")
         }
         dynamicButtons.forEach { (b, label) -> b.text = label() }
         if (prefs.timeLimitEnabled()) UsageMonitorService.start(this)
@@ -193,7 +202,20 @@ class MainActivity : AppCompatActivity() {
         val enabled = Settings.Secure.getString(
             contentResolver, Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES
         ) ?: return false
-        return enabled.contains(packageName)
+        val component = "$packageName/${BrainRotAccessibilityService::class.java.name}"
+        return enabled.split(':').any { it.equals(component, ignoreCase = true) }
+    }
+
+    private fun openSettings(intent: Intent) {
+        try {
+            if (intent.resolveActivity(packageManager) != null) startActivity(intent)
+            else startActivity(Intent(Settings.ACTION_SETTINGS))
+        } catch (_: Exception) {
+            try { startActivity(Intent(Settings.ACTION_SETTINGS)) }
+            catch (_: Exception) {
+                Toast.makeText(this, "Settings cannot be opened on this device", Toast.LENGTH_LONG).show()
+            }
+        }
     }
     
     private fun maybeRequestNotifPermission() {

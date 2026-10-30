@@ -119,7 +119,11 @@ class BlockOverlayActivity : Activity() {
     private fun checkPin() {
         if (entered.toString() == prefs.pin()) {
             if ((intent.getStringExtra(EXTRA_REASON) ?: REASON_TIME) == REASON_TIME) {
-                prefs.setGraceUntil(System.currentTimeMillis() + 15 * 60_000L)
+                // Add allowance to the cumulative watch budget. This survives a
+                // service restart and counts only time actually spent in YouTube.
+                val baseLimit = prefs.limitMinutes().coerceAtLeast(0).toLong() * 60_000L
+                val currentThreshold = maxOf(baseLimit, prefs.overrideLimitMs())
+                prefs.setOverrideLimitMs(maxOf(currentThreshold, prefs.watchedMs()) + EXTRA_WATCH_MS)
             }
             finish()
         } else {
@@ -134,6 +138,7 @@ class BlockOverlayActivity : Activity() {
         const val EXTRA_KEYWORD = "keyword"
         const val REASON_TIME = "time"
         const val REASON_CONTENT = "content"
+        private const val EXTRA_WATCH_MS = 15 * 60_000L
         
         fun launchTimeUp(context: Context) = launch(context, REASON_TIME, null)
         fun launchContent(context: Context, keyword: String) = launch(context, REASON_CONTENT, keyword)

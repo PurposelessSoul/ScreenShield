@@ -29,9 +29,16 @@ class BrainRotAccessibilityService : AccessibilityService() {
         if (!UsageMonitorService.isYouTube(packageName) || !prefs.filterEnabled()) return
         // Cooldown so one bad video doesn't trigger a block loop.
         if (now - lastBlockMs < 15_000) return
-        val root = rootInActiveWindow ?: return
         val texts = ArrayList<String>()
-        collectText(root, texts, 0)
+        // Some YouTube TV builds put the selected video's title on the event,
+        // while others expose it only in the active accessibility tree.
+        event.text?.forEach { texts.add(it.toString()) }
+        event.contentDescription?.toString()?.let(texts::add)
+        event.source?.let { source ->
+            source.text?.toString()?.let(texts::add)
+            source.contentDescription?.toString()?.let(texts::add)
+        }
+        rootInActiveWindow?.let { collectText(it, texts, 0) }
         if (texts.isEmpty()) return
         val match = KeywordFilter.match(texts.joinToString(" "), prefs.keywords().toList())
         if (match != null) {

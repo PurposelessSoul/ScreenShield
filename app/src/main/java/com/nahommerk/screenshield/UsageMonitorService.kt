@@ -59,6 +59,7 @@ class UsageMonitorService : Service() {
                     if (prefs.lastDay() != today) {
                         prefs.setLastDay(today)
                         prefs.setWatchedMs(0)
+                        prefs.setOverrideLimitMs(0)
                     }
                     updateForegroundFromUsageEvents(now)
                     // Accessibility events are delivered continuously on devices
@@ -72,10 +73,12 @@ class UsageMonitorService : Service() {
                     if (onYouTube) {
                         prefs.setWatchedMs(prefs.watchedMs() + delta)
                     }
-                    val limitMs = prefs.limitMinutes().toLong() * 60_000L
+                    val baseLimitMs = prefs.limitMinutes().coerceAtLeast(0).toLong() * 60_000L
+                    val limitMs = if (baseLimitMs == 0L) 0L
+                        else maxOf(baseLimitMs, prefs.overrideLimitMs())
                     if (onYouTube &&
                         TimeBudget.isExceeded(prefs.watchedMs(), limitMs) &&
-                        now >= prefs.graceUntil()
+                        prefs.timeLimitEnabled()
                     ) {
                         goHome()
                         BlockOverlayActivity.launchTimeUp(this@UsageMonitorService)

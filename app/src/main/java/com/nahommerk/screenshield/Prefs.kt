@@ -19,6 +19,9 @@ class Prefs(context: Context) {
     fun setLastDay(v: String) = sp.edit().putString(K_DAY, v).apply()
     fun graceUntil() = sp.getLong(K_GRACE, 0L)
     fun setGraceUntil(v: Long) = sp.edit().putLong(K_GRACE, v).apply()
+    /** Absolute watched-time threshold after a parent grants an extra 15 minutes. */
+    fun overrideLimitMs() = sp.getLong(K_OVERRIDE_LIMIT, 0L)
+    fun setOverrideLimitMs(v: Long) = sp.edit().putLong(K_OVERRIDE_LIMIT, v).apply()
     fun foregroundPackage(): String = sp.getString(K_FOREGROUND_PACKAGE, "") ?: ""
     fun foregroundPackageAt(): Long = sp.getLong(K_FOREGROUND_PACKAGE_AT, 0L)
     fun setForegroundPackage(packageName: String, at: Long) = sp.edit()
@@ -44,6 +47,7 @@ class Prefs(context: Context) {
         private const val K_WATCHED = "watched_ms"
         private const val K_DAY = "last_day"
         private const val K_GRACE = "grace_until"
+        private const val K_OVERRIDE_LIMIT = "override_limit_ms"
         private const val K_FOREGROUND_PACKAGE = "foreground_package"
         private const val K_FOREGROUND_PACKAGE_AT = "foreground_package_at"
         private const val K_PIN = "pin"
